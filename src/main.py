@@ -1,6 +1,6 @@
 # coding=utf-8
-'''
-Reference implementation of node2vec. 
+"""
+Reference implementation of node2vec.
 
 Author: Aditya Grover
 
@@ -8,25 +8,27 @@ For more details, refer to the paper:
 node2vec: Scalable Feature Learning for Networks
 Aditya Grover and Jure Leskovec 
 Knowledge Discovery and Data Mining (KDD), 2016
-'''
+"""
 
 import argparse
 import numpy as np
 import networkx as nx
 import node2vec
 from gensim.models import Word2Vec
+import pandas as pd
+import linkprediction
 
 
 def parse_args():
-    '''
+    """
     Parses the node2vec arguments.
-    '''
+    """
     parser = argparse.ArgumentParser(description="Run node2vec.")
 
     parser.add_argument('--input', nargs='?', default='graph/karate.edgelist',
                         help='Input graph path')
 
-    parser.add_argument('--output', nargs='?', default='emb/karate.emb',
+    parser.add_argument('--output', nargs='?', default='email-Eu-core.emb',
                         help='Embeddings path')
 
     parser.add_argument('--dimensions', type=int, default=128,
@@ -47,7 +49,7 @@ def parse_args():
     parser.add_argument('--workers', type=int, default=8,
                         help='Number of parallel workers. Default is 8.')
 
-    parser.add_argument('--p', type=float, default=1,
+    parser.add_argument('--p', type=float, default=2,
                         help='Return hyperparameter. Default is 1.')
 
     parser.add_argument('--q', type=float, default=1,
@@ -66,44 +68,72 @@ def parse_args():
     return parser.parse_args()
 
 
-def read_graph():
-    '''
+def read_graph(slice_count):
+    """
     Reads the input network in networkx.
-    '''
-    if args.weighted:
-        G = nx.read_edgelist(args.input, nodetype=int, data=(('weight', float),), create_using=nx.DiGraph())
-    else:
-        G = nx.read_edgelist(args.input, nodetype=int, create_using=nx.DiGraph())
-        for edge in G.edges():
-            G[edge[0]][edge[1]]['weight'] = 1
+    """
+    col_index = ["x", "y", "time"]
+    result = pd.read_table('email-Eu-core-temporal-Dept1.txt', sep=' ', header=None, names=col_index)
+    list_G = []
+    set_edge = set()
+    max_time = result['time'].max()
+    slice_num = max_time / slice_count + 1
+    G_test = nx.Graph()
+    G_normal = nx.Graph()
+    # 添加所有节点到图中
+    G_normal.add_nodes_from(result['x'].tolist())
+    G_normal.add_nodes_from(result['y'].tolist())
+    for i in range(1, slice_count + 1):
+        G = nx.Graph()
+        # 添加所有节点到图中
+        G.add_nodes_from(result['x'].tolist())
+        G.add_nodes_from(result['y'].tolist())
+        # 获取某个时间切片所有节点对
+        edge = result[(result['time'] >= (i - 1) * slice_num) & (result['time'] < i * slice_num)].iloc[:, 0:2]
+        # 统计出现频率作为边权重
+        weighted_edge = edge.groupby(['x', 'y']).size().reset_index()
+        weighted_edge.rename(columns={0: 'frequency'}, inplace=True)
+        weighted_edge_tuples = [tuple(xi) for xi in weighted_edge.values]
+        G.add_weighted_edges_from(weighted_edge_tuples)
+        # 测试集
+        if i == slice_count:
+            G_test = G
+            for edge in G_test.edges():
+                if G_test[edge[0]][edge[1]]['weight'] > 1:
+                    G_test[edge[0]][edge[1]]['weight'] = 1
+            continue
+        weighted_edge['frequency'] = 1
+        edge_tuples = [tuple(xi) for xi in weighted_edge.values]
+        G_normal.add_weighted_edges_from(edge_tuples)
+        list_G.append(G)
 
-    if not args.directed:
-        G = G.to_undirected()
-
-    return G
+    return list_G, G_normal, G_test
 
 
 def learn_embeddings(walks):
-    '''
+    """
     Learn embeddings by optimizing the Skipgram objective using SGD.
-    '''
+    """
     walks = [map(str, walk) for walk in walks]
     model = Word2Vec(walks, size=args.dimensions, window=args.window_size, min_count=0, sg=1, workers=args.workers,
                      iter=args.iter)
     model.save_word2vec_format(args.output)
-
-    return
+    return model
 
 
 def main(args):
-    '''
+    """
     Pipeline for representational learning for all nodes in a graph.
-    '''
-    nx_G = read_graph()
-    G = node2vec.Graph(nx_G, args.directed, args.p, args.q)
-    G.preprocess_transition_probs()
+    """
+    temporary = True
+    # temporary = False
+    graphs, graph, graph_test = read_graph(20)
+    G = node2vec.Graph(graphs, graph, 0.8, args.directed, args.p, args.q)
+    G.preprocess_transition_probs(temporary)
     walks = G.simulate_walks(args.num_walks, args.walk_length)
-    learn_embeddings(walks)
+    model = learn_embeddings(walks)
+    predict = linkprediction.LinkPrediction(graph, graph_test, model)
+    predict.predict()
 
 
 if __name__ == "__main__":
