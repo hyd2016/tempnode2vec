@@ -17,6 +17,8 @@ import node2vec
 from gensim.models import Word2Vec
 import pandas as pd
 import linkprediction
+from scipy.io import loadmat
+import time
 
 
 def parse_args():
@@ -126,14 +128,40 @@ def main(args):
     Pipeline for representational learning for all nodes in a graph.
     """
     temporary = True
+    isEnron = False
     # temporary = False
-    graphs, graph, graph_test = read_graph(20)
+    if isEnron:
+        graphs, graph, graph_test = read_enron_graph()
+    else:
+        graphs, graph, graph_test = read_graph(20)
+    print "读图时间", time.time()
     G = node2vec.Graph(graphs, graph, 0.8, args.directed, args.p, args.q)
     G.preprocess_transition_probs(temporary)
     walks = G.simulate_walks(args.num_walks, args.walk_length)
     model = learn_embeddings(walks)
     predict = linkprediction.LinkPrediction(graph, graph_test, model)
     predict.predict()
+
+
+def read_enron_graph():
+    m = loadmat("enron.mat")
+    data = m["enron"]["email_sender"][0, 0]
+    data_size = data.shape
+    list_graph = []
+    nodes = list(range(14908))
+    graph = nx.Graph()
+    graph.add_nodes_from(nodes)
+    for i in range(data_size[1]):
+        G = nx.Graph()
+        G.add_nodes_from(nodes)
+        coo = data[0, i].tocoo(copy=False)
+        edges = pd.DataFrame({'index': coo.row, 'col': coo.col, 'data': coo.data}
+                             )[['index', 'col', 'data']].sort_values(['index', 'col']).reset_index(drop=True)
+        edges_tuple = [tuple(edge) for edge in edges.values]
+        graph.add_weighted_edges_from(edges_tuple)
+        G.add_weighted_edges_from(edges_tuple)
+        list_graph.append(G)
+    return list_graph, graph, list_graph.pop(-1)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from sklearn import metrics
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+import time
 
 
 class LinkPrediction:
@@ -26,8 +27,6 @@ class LinkPrediction:
         # 遍历图的所有可能的边
         for i in range(size_nodes):
             for j in range(i + 1, size_nodes):
-                te = graph.nodes()[i]
-                tt = graph.nodes()[j]
                 feature = model[str(graph.nodes()[i])] * model[str(graph.nodes()[j])]
                 if graph.has_edge(i, j):
                     label.append(1)
@@ -41,7 +40,7 @@ class LinkPrediction:
         通过SVM进行分类，并进行预测
         :return:
         """
-        svm_rbf = svm.SVC(C=0.8, gamma=200, class_weight='balanced', probability=True)
+        svm_rbf = svm.SVC(C=0.8, gamma=200, class_weight='balanced')
         # svm_rbf = LogisticRegression(class_weight='balanced')
         train_feature, train_label = self.data_label(self.graph_train)
         train_feature = np.array(train_feature)
@@ -52,9 +51,11 @@ class LinkPrediction:
         true_features, true_label = self.data_label(self.graph_test)
         true_features = np.array(true_features)
         true_features = true_features/np.max(true_features)
-        predict_probability = svm_rbf.predict_proba(true_features)[:, 1]
-        fpr, tpr, thresholds = metrics.roc_curve(true_label, predict_probability, pos_label=1)
-        plt.plot(fpr, tpr, marker='o')
-        plt.show()
+        predict_probability = svm_rbf.predict(true_features)
+        # predict_probability = svm_rbf.predict_proba(true_features)[:, 1]
+        # fpr, tpr, thresholds = metrics.roc_curve(true_label, predict_probability, pos_label=1)
+        # plt.plot(fpr, tpr, marker='o')
+        # plt.show()
         auc_score = roc_auc_score(true_label, predict_probability)
         print auc_score
+
